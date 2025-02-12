@@ -67,13 +67,11 @@ def get_characteristic(values, component: str, keep_string: bool = False):
 
 
 def params(model):
-    model.impMax = get_characteristic(data_geral, 'Base Power (kW)')
-                            
-    model.expMax = get_characteristic(data_geral, 'Base Power (kW)')
+    model.impMax = get_characteristic(data_geral, 'Imp Max (kW)')               
+    model.expMax = get_characteristic(data_geral, 'Exp Max (kW)')
     
     # GENERATORS:
-    n_gens = 2
-    model.gen = pe.Set(initialize=np.arange(1, n_gens + 1),
+    model.gen = pe.Set(initialize=np.arange(1, len(get_characteristic(data_gen, 'Nominal Power (kW)')) + 1),
                         doc='Number of generators')
     model.genMax = pe.Param(model.gen, initialize=convert_to_dictionary(get_characteristic(data_gen, 'Nominal Power (kW)')),
                                 doc='Gen Max')
@@ -89,12 +87,11 @@ def params(model):
     model.genExcCost = 0 
     
     # LOADS:
-    n_loads = 6
-    model.loads = pe.Set(initialize=np.arange(1, n_loads + 1),doc='Number of loads')
+    model.loads = pe.Set(initialize=np.arange(1, len(get_characteristic(data_load, 'Nominal Power (kW)')) + 1),doc='Number of loads')
     
     #@TODO NÃO TO A USAR O LOAD MAX PRA NADA POR ENQUANTO
-    model.loadMax = pe.Param(model.loads, initialize=convert_to_dictionary(get_characteristic(data_load, 'Nominal Power (kW)')),
-                                doc='Load Max')
+#    model.loadMax = pe.Param(model.loads, initialize=convert_to_dictionary(get_characteristic(data_load, 'Nominal Power (kW)')),
+#                                doc='Load Max')
     model.loadValues = pe.Param(model.loads, model.t, initialize=convert_to_dictionary(get_timeseries(data_load, 'Consumption (kW)')),
                                 doc='Load Power During time')
     # GRID IMPORT AND EXPORT:
@@ -102,8 +99,7 @@ def params(model):
     model.expCost = 1
 
     # BESS:
-    n_bess = 1
-    model.stor = pe.Set(initialize=np.arange(1, n_bess + 1), doc='Number of storage units')
+    model.stor = pe.Set(initialize=np.arange(1, len(get_characteristic(data_bess, 'Nominal Power (kW)')) + 1), doc='Number of storage units')
 
     model.storMax = pe.Param(model.stor, initialize=convert_to_dictionary(get_characteristic(data_bess, 'Nominal Power (kW)'))) #kW
 
@@ -138,8 +134,7 @@ def params(model):
     model.storDchCost = 1
     
     # EVS:
-    n_evs = 2
-    model.v2g = pe.Set(initialize=np.arange(1, n_evs + 1),
+    model.v2g = pe.Set(initialize=np.arange(1, len(get_characteristic(data_evs, 'Maximum Power Delivery (kW)')) + 1),
                         doc='Number of EVs')
     model.v2gDchMax = pe.Param(model.v2g, 
                             initialize=convert_to_dictionary(get_characteristic(data_evs, 'Maximum Power Delivery (kW)')),
@@ -282,23 +277,23 @@ def constraints(model):
     # Battery discharge limit 
     def _storDchRateEq(m, s, t):
         return m.storDischarge[s, t] <= m.storDchMax[s] * m.storDchXo[s, t]
-    model.storDchRateEq = pe.Constraint(model.stor, model.t, rule=_storDchRateEq,
-                                            doc='Maximum discharging rate')
+    #model.storDchRateEq = pe.Constraint(model.stor, model.t, rule=_storDchRateEq,
+    #                                        doc='Maximum discharging rate')
     # Battery power charge limit
     def _storChRateEq(m, s, t):
         return m.storCharge[s, t] <= m.storChMax[s] * m.storChXo[s, t]
-    model.storChRateEq = pe.Constraint(model.stor, model.t, rule=_storChRateEq,
-                                        doc='Maximum charging rate')
+    #model.storChRateEq = pe.Constraint(model.stor, model.t, rule=_storChRateEq,
+    #                                    doc='Maximum charging rate')
     # Battery energy limit 
     def _storMaxEq(m, s, t):
         return m.storState[s, t] <= m.storMax[s]
-    model.storMaxEq = pe.Constraint(model.stor, model.t, rule=_storMaxEq,
-                                        doc='Maximum energy capacity')
+    #model.storMaxEq = pe.Constraint(model.stor, model.t, rule=_storMaxEq,
+    #                                    doc='Maximum energy capacity')
     # Battery energy limit considering the relax variable  
     def _storRelaxEq(m, s, t):
         return m.storState[s, t] >= m.storMax[s] * m.storMin[s]  - m.storRelax[s, t]
-    model.storRelaxEq = pe.Constraint(model.stor, model.t, rule=_storRelaxEq,
-                                        doc='Relaxation variable')
+    #model.storRelaxEq = pe.Constraint(model.stor, model.t, rule=_storRelaxEq,
+    #                                    doc='Relaxation variable')
     # Energy balance in the battery
     def _storBalanceEq(m, s, t):
         if t == m.t.first():
@@ -306,36 +301,36 @@ def constraints(model):
         elif t > m.t.first():
             return m.storState[s, t] == m.storState[s, t - 1] + m.storCharge[s, t] * m.storChEff[s] * 24/m.t.last() - m.storDischarge[s, t] * 24/m.t.last() / m.storDchEff[s]
         return default_behaviour
-    model.storBalanceEq = pe.Constraint(model.stor, model.t, rule=_storBalanceEq,
-                                            doc='Energy balance')
+    #model.storBalanceEq = pe.Constraint(model.stor, model.t, rule=_storBalanceEq,
+    #                                        doc='Energy balance')
     # Binary limits for the battery
     def _storChDchEq(m, s, t):
         return m.storChXo[s, t] + m.storDchXo[s, t] <= 1
-    model.storChDchEq = pe.Constraint(model.stor, model.t, rule=_storChDchEq,
-                                        doc='Charging and discharging are mutually exclusive')
+    #model.storChDchEq = pe.Constraint(model.stor, model.t, rule=_storChDchEq,
+    #                                    doc='Charging and discharging are mutually exclusive')
 
     def storMinExitSoC(m, s, t):
         if t == m.t.last():
             return m.storState[s, t] >= m.storBatteryTarget[s] * m.storMax[s]
         return default_behaviour
-    model.storMinExitSoC_cons = pe.Constraint(model.stor, model.t, rule=storMinExitSoC,
-                                        doc='Min Exit Soc')
+    #model.storMinExitSoC_cons = pe.Constraint(model.stor, model.t, rule=storMinExitSoC,
+    #                                    doc='Min Exit Soc')
 
     # EV power discharge limit
     def _v2gDchRateEq(m, v, t):
         return m.v2gDischarge[v, t] <= m.v2gDchMax[v] * m.v2gDchXo[v, t]
-    model.v2gDchRateEq = pe.Constraint(model.v2g, model.t, rule=_v2gDchRateEq,
-                                        doc='Maximum discharging rate')
+    #model.v2gDchRateEq = pe.Constraint(model.v2g, model.t, rule=_v2gDchRateEq,
+    #                                    doc='Maximum discharging rate')
     # EV power charge limit
     def _v2gChRateEq(m, v, t):
         return m.v2gCharge[v, t] <= m.v2gChMax[v] * m.v2gChXo[v, t]
-    model.v2gChRateEq = pe.Constraint(model.v2g, model.t, rule=_v2gChRateEq,
-                                        doc='Maximum charging rate')
+    #model.v2gChRateEq = pe.Constraint(model.v2g, model.t, rule=_v2gChRateEq,
+    #                                    doc='Maximum charging rate')
     # Energy in the battery limit
     def _v2gMaxEq(m, v, t):
         return m.v2gState[v, t] <= m.v2gMax[v]
-    model.v2gMaxEq = pe.Constraint(model.v2g, model.t, rule=_v2gMaxEq,
-                                    doc='Maximum energy capacity')
+    #model.v2gMaxEq = pe.Constraint(model.v2g, model.t, rule=_v2gMaxEq,
+    #                                doc='Maximum energy capacity')
     # To validate the SOC requiered when the EV connects to the CS
     def _v2gRelaxEq(m, v, t):
     # First it is validated if the EV is connected to the CS with this if
@@ -349,8 +344,8 @@ def constraints(model):
         else:
             return default_behaviour
         
-    model.v2gRelaxEq = pe.Constraint(model.v2g, model.t, rule=_v2gRelaxEq,
-                                        doc='Relaxation variable')
+    #model.v2gRelaxEq = pe.Constraint(model.v2g, model.t, rule=_v2gRelaxEq,
+    #                                    doc='Relaxation variable')
     # Energy balance in the EV battery    
     def _v2gStateEq(m, v, t):
         if m.v2gConnected[v, t] == 0: # If vehicle is not scheduled (not connected to the CS)
@@ -364,26 +359,29 @@ def constraints(model):
                 return m.v2gState[v, t] == m.v2gScheduleArrivalSOC[v] + m.v2gCharge[v, t] * m.v2gChEff[v] * 24/m.t.last() - m.v2gDischarge[v, t] * 24/m.t.last() / m.v2gDchEff[v]
         return default_behaviour
 
-    model.v2gStateEq = pe.Constraint(model.v2g, model.t, rule=_v2gStateEq,
-                                        doc='State of charge')
+    #model.v2gStateEq = pe.Constraint(model.v2g, model.t, rule=_v2gStateEq,
+    #                                    doc='State of charge')
     # Binary limit for the EV battery charging and discharging process
     def _v2gChDchEq(m, v, t):
         #return m.v2gCharge[v, t] + m.v2gDischarge[v, t] <= 1
         return m.v2gChXo[v, t] + m.v2gDchXo[v, t] <= 1
-    model.v2gChDchEq = pe.Constraint(model.v2g, model.t, rule=_v2gChDchEq,
-                                        doc='Charging and discharging cannot occur simultaneously')
+    #model.v2gChDchEq = pe.Constraint(model.v2g, model.t, rule=_v2gChDchEq,
+    #                                    doc='Charging and discharging cannot occur simultaneously')
 
     def _balanceEq(m, t):
         temp_gens = sum([m.genActPower[g, t] - m.genExcPower[g, t]
                         for g in np.arange(1, m.gen.last() + 1)])
 
-        temp_stor = sum([m.storCharge[s, t] - m.storDischarge[s, t]
-                        for s in np.arange(1, m.stor.last() + 1)])
+        #temp_stor = sum([m.storCharge[s, t] - m.storDischarge[s, t]
+        #                for s in np.arange(1, m.stor.last() + 1)])
 
-        temp_v2g = sum([m.v2gCharge[v, t] - m.v2gDischarge[v, t]
-                        for v in np.arange(1, m.v2g.last() + 1)])
+        #temp_v2g = sum([m.v2gCharge[v, t] - m.v2gDischarge[v, t]
+        #                for v in np.arange(1, m.v2g.last() + 1)])
         
-        return temp_gens - temp_stor - temp_v2g + m.imports[t] - m.exports[t] == 0
+        temp_load = sum([m.loadValues[l, t] for l in np.arange(1, m.loads.last() + 1)])
+        #return temp_gens - temp_stor - temp_v2g + temp_load + m.imports[t] - m.exports[t] == 0
+        return temp_gens + temp_load + m.imports[t] - m.exports[t] == 0
+    
     model.balanceEq = pe.Constraint(model.t, rule=_balanceEq,
                                         doc='Balance equation')
 
