@@ -239,7 +239,7 @@ def constraints(model):
         if m.genType[g] == 1:
             return m.genActPower[g, t] <= m.genMax[g]
         elif m.genType[g] == 2:
-            return m.genActPower[g, t] + m.genExcPower[g, t] == m.genMax[g]
+            return m.genActPower[g, t] + m.genExcPower[g, t] == m.genValues[g, t]
         return default_behaviour
 
     model.genActMaxEq = pe.Constraint(model.gen, model.t, rule=_genActMaxEq,
@@ -318,22 +318,6 @@ def constraints(model):
         
     model.v2gRelaxEq = pe.Constraint(model.v2g, model.t, rule=_v2gRelaxEq,
                                         doc='Relaxation variable')
-    '''# Energy balance in the EV battery    
-    def _v2gStateEq(m, v, t):
-        if m.v2gConnected[v, t] == 0: # If vehicle is not scheduled (not connected to the CS)
-            return m.v2gState[v, t] == 0
-        elif (m.v2gConnected[v, t] == 1) & (t == m.t.first()): # If vehicle is scheduled and it is the first time step
-            return m.v2gState[v, t] == m.v2gScheduleArrivalEnergy[v] + m.v2gCharge[v, t] * m.v2gChEff[v]  - m.v2gDischarge[v, t]  / m.v2gDchEff[v]
-        elif t > 1: # If not the first time step
-            if (m.v2gConnected[v, t - 1] == 1) & (m.v2gConnected[v, t] == 1): # If was and is currently connected
-                return m.v2gState[v, t] == m.v2gState[v, t - 1] + m.v2gCharge[v, t] * m.v2gChEff[v]  - m.v2gDischarge[v, t]  / m.v2gDchEff[v]
-            elif (m.v2gConnected[v, t - 1] == 0) & (m.v2gConnected[v, t] == 1): # If became connected
-                return m.v2gState[v, t] == m.v2gScheduleArrivalEnergy[v] + m.v2gCharge[v, t] * m.v2gChEff[v]  - m.v2gDischarge[v, t]  / m.v2gDchEff[v]
-        return default_behaviour
-
-    model.v2gStateEq = pe.Constraint(model.v2g, model.t, rule=_v2gStateEq,
-                                        doc='State of charge')'''
-                                        
     def _v2gBalanceEq(m, v, t):
         if t == m.t.first():
             return m.v2gState[v, t] == m.v2gScheduleArrivalEnergy[v] + m.v2gCharge[v, t] * m.v2gChEff[v]- m.v2gDischarge[v, t] / m.v2gDchEff[v]
@@ -370,7 +354,7 @@ def constraints(model):
                         for v in np.arange(1, m.v2g.last() + 1)])
         
         return temp_gens - temp_load - temp_stor - temp_v2g == 0
-        #return temp_gens - temp_load == 0
+
     model.balanceEq = pe.Constraint(model.t, rule=_balanceEq,
                                         doc='Balance equation')
     def obj_rule(model):
