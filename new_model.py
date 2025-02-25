@@ -103,7 +103,17 @@ class DC_Community_Opt():
             for j, another_value in enumerate(self.edf_in_use_components['node_number'])
             if value == another_value or self.edf_components['component_type'][i] == 'AC Grid'
         ]))
-                    
+        
+        # GENERAL SETTINGS:
+        self.edf_in_use_components['impMax'] = self.get_characteristic(self.data_edf_geral, 'Total PV power installed (kWp)')               
+        self.edf_in_use_components['expMax'] = self.get_characteristic(self.data_edf_geral, 'Total PV power installed (kWp)')
+        
+        self.edf_in_use_components['period'] = self.get_characteristic(self.data_edf_geral, 'Simulation period (days)')
+        self.edf_in_use_components['timestep'] = self.get_characteristic(self.data_edf_geral, 'Simulation time step (mins)')
+        self.edf_in_use_components['dT'] =  self.edf_in_use_components['timestep'] / 60
+        n_time = self.edf_in_use_components['period']*24*self.edf_in_use_components['dT']
+        self.edf_in_use_components['n_time'] = int(n_time[0])  
+          
         # AC GRID:
         self.edf_in_use_components['ac_grid_ids'] = [t[1] for t in self.edf_in_use_components['nodes_types'] if t[0] == "AC Grid"]
         self.edf_in_use_components['n_ac_grid'] = len(self.edf_in_use_components['ac_grid_ids'])
@@ -141,7 +151,7 @@ class DC_Community_Opt():
         # BESS:
 
         self.edf_in_use_components['bess_ids'] = [t[1] for t in self.edf_in_use_components['nodes_types'] if t[0] == "Storage"]
-        self.edf_in_use_components['n_storage'] = len(self.edf_in_use_components['bess_ids'])
+        self.edf_in_use_components['n_bess'] = len(self.edf_in_use_components['bess_ids'])
 
         self.edf_in_use_components['bess_nominal_power'] = [
             self.edf_components['nominal_power'][i]
@@ -172,16 +182,21 @@ class DC_Community_Opt():
                                                        if t[0] == "PV "]
 
         self.edf_in_use_components['pv_nominal_power'] = [
-            edf_components['nominal_power'][i]
-            for i, value in enumerate(edf_components['node_number'])
+            self.edf_components['nominal_power'][i]
+            for i, value in enumerate(self.edf_components['node_number'])
             if value in self.edf_in_use_components['pv_ids']
         ]
-        self.edf_in_use_components['pv_power_profile'] = [
+        pv_power_profile = [
             [pu * power for pu in profile] 
             for profile, power in zip(self.edf_in_use_components['pv_pu_profile'], 
                                     self.edf_in_use_components['pv_nominal_power'])
         ]
 
+        self.edf_in_use_components['pv_power_profile'] = [
+            profile[:self.edf_in_use_components['n_time']]
+            for profile in pv_power_profile
+        ]
+            
         # LOADS:
 
         self.edf_in_use_components['load_ids'] = [t[1] for t in self.edf_in_use_components['nodes_types'] if t[0] == "DC Load"]
@@ -197,38 +212,33 @@ class DC_Community_Opt():
             if value in self.edf_in_use_components['load_ids']
         ]
 
-        self.edf_in_use_components['load_power_profile'] = [
+        load_power_profile = [
             [pu * power for pu in profile] 
             for profile, power in zip(self.edf_in_use_components['load_pu_profile'], 
                                     self.edf_in_use_components['load_nominal_power'])
         ]
-
-        self.edf_in_use_components['impMax'] = self.get_characteristic(self.data_edf_geral, 'Total PV power installed (kWp)')               
-        self.edf_in_use_components['expMax'] = self.get_characteristic(self.data_edf_geral, 'Total PV power installed (kWp)')
-        
-        self.edf_in_use_components['period'] = self.get_characteristic(self.data_edf_geral, 'Simulation period (days)')
-        self.edf_in_use_components['timestep'] = self.get_characteristic(self.data_edf_geral, 'Simulation time step (mins)')
-        self.edf_in_use_components['dT'] =  self.edf_in_use_components['timestep'] / 60
-        self.edf_in_use_components['n_time'] = self.edf_in_use_components['period']*24*self.edf_in_use_components['dt']
-
+        self.edf_in_use_components['load_power_profile'] = [
+            profile[:self.edf_in_use_components['n_time']]
+            for profile in load_power_profile
+        ]
+    
     def params(self):
+        self.extract_excel_data()
         self.model.t = pe.Set(initialize=np.arange(1, self.edf_in_use_components['n_time'] + 1),
                     doc='Time periods')
         self.model.impMax = self.edf_in_use_components['impMax']
         self.model.expMax = self.edf_in_use_components['expMax']
         
         # GENERATORS:
-        self.model.gen = pe.Set(initialize=np.arange(1, self.edf_in_use_components['n_pvs']),
+        self.model.gen = pe.Set(initialize=np.arange(1, self.edf_in_use_components['n_pvs'] + 1),
                             doc='Number of generators')
         self.model.genMax = pe.Param(self.model.gen, initialize=self.convert_to_dictionary(np.array(self.edf_in_use_components['pv_nominal_power'])),
                                     doc='Gen Max')
-        
         self.model.genValues = pe.Param(self.model.gen, self.model.t,
                                 initialize=self.convert_to_dictionary(np.array(self.edf_in_use_components['pv_power_profile'])),
                                 doc='Forecasted power generation')
-        
         # AC GENERATORS:
-        self.model.ac_gen = pe.Set(initialize=np.arange(1, self.edf_in_use_components['n_ac_grid']),
+        self.model.ac_gen = pe.Set(initialize=np.arange(1, self.edf_in_use_components['n_ac_grid'] + 1),
                             doc='Number of generators')
         self.model.acGenMax = pe.Param(self.model.ac_gen, initialize=self.convert_to_dictionary(np.array(self.edf_in_use_components['ac_grid_nominal_power'])),
                                     doc='Gen Max')
@@ -253,23 +263,26 @@ class DC_Community_Opt():
         self.model.storChMax = pe.Param(self.model.stor,
                                     initialize=self.convert_to_dictionary(np.array(self.edf_in_use_components['bess_nominal_power'])),
                                     doc='Starting energy capacity')
-    
-        self.model.storMin = pe.Param(self.model.stor,
-                            initialize=self.convert_to_dictionary(),
-                            doc='Starting energy capacity')
-
+        bess_min = [0] * self.edf_in_use_components['n_bess']
+        self.model.storMinSoC = pe.Param(self.model.stor,
+                            initialize=self.convert_to_dictionary(np.array(bess_min)),
+                            doc='Minimum SoC level (p.u)')
+        stor_start = [0] * self.edf_in_use_components['n_bess']
         self.model.storStart = pe.Param(self.model.stor,
-                                initialize=convert_to_dictionary())
-
+                                initialize=self.convert_to_dictionary(np.array(stor_start)),
+                                doc='Initial SoC battery (p.u)')
+        stor_dch_eff = [0.92] * self.edf_in_use_components['n_bess']
         self.model.storDchEff = pe.Param(self.model.stor,
-                                initialize=convert_to_dictionary(),
-                                doc='Starting SoC (%)')
+                                initialize=self.convert_to_dictionary(np.array(stor_dch_eff)),
+                                doc='Stor discharging efficiency (p.u)')
+        stor_ch_eff = [0.92] * self.edf_in_use_components['n_bess']
         self.model.storChEff = pe.Param(self.model.stor,
-                                initialize=convert_to_dictionary(),
-                                doc='Starting SoC (%)')
+                                initialize=self.convert_to_dictionary(np.array(stor_ch_eff)),
+                                doc='Stor charging efficiency (p.u)')
+        stor_target = [0.75] * self.edf_in_use_components['n_bess']
         self.model.storBatteryTarget = pe.Param(self.model.stor,
-                                initialize=convert_to_dictionary(),
-                                doc='Target SoC (%)')
+                                initialize=self.convert_to_dictionary(np.array(stor_target)),
+                                doc='Target SoC (p.u)')
         
         # EVS:
         self.model.v2g = pe.Set(initialize=np.arange(1, self.edf_in_use_components['n_evs'] + 1),
@@ -296,9 +309,11 @@ class DC_Community_Opt():
         v2g_min = [0] * self.edf_in_use_components['n_evs']
         self.model.v2gMin = pe.Param(self.model.v2g,
                                 initialize=self.convert_to_dictionary(np.array(v2g_min)),
-                                doc='Minimum energy capacity')
+                                doc='Minimum energy capacity (p.u)')
         
-        v2g_conn = [1] * self.edf_in_use_components['n_time']
+        is_conn = [1] * self.edf_in_use_components['n_time']
+        v2g_conn = [is_conn for ev in range(self.edf_in_use_components['n_evs'])]
+
         self.model.v2gConnected = pe.Param(self.model.v2g, self.model.t,
                                     initialize=self.convert_to_dictionary(np.array(v2g_conn)),
                                     doc='Vehicle schedule')
@@ -306,11 +321,11 @@ class DC_Community_Opt():
         
         self.model.v2gScheduleArrivalSoC = pe.Param(self.model.v2g,
                                             initialize=self.convert_to_dictionary(np.array(v2g_arrival_soc)),
-                                            doc='Vehicle schedule arrival SOC')
+                                            doc='Vehicle schedule arrival SOC (p.u)')
         v2g_target_soc = [0.9] * self.edf_in_use_components['n_evs']
         self.model.v2gScheduleTargetSoC = pe.Param(self.model.v2g,
                                                 initialize=self.convert_to_dictionary(np.array(v2g_target_soc)),
-                                                doc='Vehicle schedule required')
+                                                doc='Vehicle schedule required (p.u)')
         
     def vars(self):
         # SYSTEM
@@ -373,7 +388,7 @@ class DC_Community_Opt():
                                 doc='Relaxtion variable for following schedule of charging')
         self.model.v2gScheduleDchRelax = pe.Var(self.model.v2g, self.model.t, within=pe.Reals, initialize=0,
                                 doc='Relaxtion variable for following schedule of discharging')
-
+        
     def constraints(self):
         # Upper limit for the PV generator
         def _genActMaxEq(m, g, t):
@@ -405,17 +420,17 @@ class DC_Community_Opt():
                                             doc='Maximum energy capacity')
         # Battery energy limit considering the relax variable  
         def _storRelaxEq(m, s, t):
-            return m.storState[s, t] >= m.storMin[s]  - m.storRelax[s, t]
+            return m.storState[s, t] >= m.storMinSoC[s] * m.storMax[s]  - m.storRelax[s, t]
         self.model.storRelaxEq = pe.Constraint(self.model.stor, self.model.t, rule=_storRelaxEq,
                                             doc='Relaxation variable')
         
         # Energy balance in the battery @TODO O PROBLEMA ESTÁ AQUI
         def _storBalanceEq(m, s, t):
             if t == m.t.first():
-                return m.storState[s, t] == m.storStart[s] + m.storCharge[s, t] * m.storChEff[s]- m.storDischarge[s, t] / m.storDchEff[s]
+                return m.storState[s, t] == m.storStart[s] * m.storMax[s] + m.storCharge[s, t] * m.storChEff[s]- m.storDischarge[s, t] / m.storDchEff[s]
             elif t > m.t.first():
                 return m.storState[s, t] == m.storState[s, t - 1] + m.storCharge[s, t] * m.storChEff[s] - m.storDischarge[s, t] / m.storDchEff[s]
-            return default_behaviour
+            return self.default_behaviour
         self.model.storBalanceEq = pe.Constraint(self.model.stor, self.model.t, rule=_storBalanceEq,
                                                 doc='Energy balance')
         
@@ -428,7 +443,7 @@ class DC_Community_Opt():
         def storMinExitSoC(m, s, t):
             if t == m.t.last():
                 return m.storState[s, t] >= m.storBatteryTarget[s] * m.storMax[s]
-            return default_behaviour
+            return self.default_behaviour
         self.model.storMinExitSoC_cons = pe.Constraint(self.model.stor, self.model.t, rule=storMinExitSoC,
                                             doc='Min Exit Soc')
         
@@ -453,12 +468,12 @@ class DC_Community_Opt():
             if m.v2gConnected[v, t] == 1: #Quando chega ao ponto de carregamento tem que estar com maior SOC que o minimo
             #Then, it is validated the SOC required in energy, in case of this SOC being 0, the energy in the EV battery must be atleast the minimum 
                 if m.v2gScheduleTargetSoC[v] * m.v2gMax[v] == 0:
-                    return m.v2gState[v, t] >= m.v2gMin[v] - m.v2gRelax[v, t]
+                    return m.v2gState[v, t] >= m.v2gMin[v] * m.v2gMax - m.v2gRelax[v, t]
                 # In case of the SOC required will be differente from 0, the energy in the battery must be more than this soc 
                 else:
                     return m.v2gState[v, t] >= m.v2gScheduleTargetSoC[v] * m.v2gMax[v] - m.v2gRelax[v, t]
             else:
-                return default_behaviour
+                return self.default_behaviour
             
         self.model.v2gRelaxEq = pe.Constraint(self.model.v2g, self.model.t, rule=_v2gRelaxEq,
                                             doc='Relaxation variable')
@@ -467,7 +482,7 @@ class DC_Community_Opt():
                 return m.v2gState[v, t] == m.v2gScheduleArrivalSoC[v] * m.v2gMax[v] + m.v2gCharge[v, t] * m.v2gChEff[v]- m.v2gDischarge[v, t] / m.v2gDchEff[v]
             elif t > m.t.first():
                 return m.v2gState[v, t] == m.v2gState[v, t - 1] + m.v2gCharge[v, t] * m.v2gChEff[v] - m.v2gDischarge[v, t] / m.v2gDchEff[v]
-            return default_behaviour
+            return self.default_behaviour
         
         self.model.v2gBalanceEq = pe.Constraint(self.model.v2g, self.model.t, rule=_v2gBalanceEq,
                                             doc='State of charge')
@@ -481,30 +496,30 @@ class DC_Community_Opt():
         def _v2gMinExitSoC(m, v, t):
             if t == m.t.last():
                 return m.v2gState[v, t] >= m.v2gScheduleTargetSoC[v] * m.v2gMax[v]
-            return default_behaviour
+            return self.default_behaviour
         self.model.v2gMinExitSoC = pe.Constraint(self.model.v2g, self.model.t, rule=_v2gMinExitSoC,
                                             doc='Min Exit Soc')
               
         def _balanceEq(m, t):
             temp_gens = sum([m.genActPower[g, t] - m.genExcPower[g, t]
-                            for g in np.arange(1, m.gen.last() + 1)])
+                            for g in np.arange(1, self.edf_in_use_components['n_pvs'] + 1)])
+            temp_ac_gens = sum(m.acGenActPower[ac, t] for ac in np.arange(1, self.edf_in_use_components['n_ac_grid'] + 1))
             
-            temp_ac_gens = sum(m.acGenActPower[ac, t] for ac in np.arange(1, m.ac_gen.last() + 1))
+            temp_load = sum([m.loadValues[l, t] for l in np.arange(1, self.edf_in_use_components['n_loads'] + 1)])
             
-            temp_load = sum([m.loadValues[l, t] for l in np.arange(1, m.loads.last() + 1)])
-
+            
             temp_stor = sum([m.storCharge[s, t] - m.storDischarge[s, t]
-                            for s in np.arange(1, m.stor.last() + 1)])
-
+                            for s in np.arange(1, self.edf_in_use_components['n_bess'] + 1)])
+        
             temp_v2g = sum([m.v2gCharge[v, t] - m.v2gDischarge[v, t]
-                            for v in np.arange(1, m.v2g.last() + 1)])
-            
+                            for v in np.arange(1, self.edf_in_use_components['n_evs'] + 1)])
             return temp_gens + temp_ac_gens - temp_load - temp_stor - temp_v2g == 0
 
         self.model.balanceEq = pe.Constraint(self.model.t, rule=_balanceEq,
                                             doc='Balance equation')
         def obj_rule(m):
-            return sum(m.acGenActPower[ac, t] for t in np.arange(m.t.first(), m.t.last() + 1)
+            return sum(m.acGenActPower[ac, t] 
+                    for t in np.arange(m.t.first(), m.t.last() + 1)
                     for ac in np.arange(1, m.ac_gen.last() + 1))
         
         self.model.obj = pe.Objective(expr=obj_rule, sense=pe.minimize)
