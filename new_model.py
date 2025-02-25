@@ -107,7 +107,11 @@ class DC_Community_Opt():
         # AC GRID:
         self.edf_in_use_components['ac_grid_ids'] = [t[1] for t in self.edf_in_use_components['nodes_types'] if t[0] == "AC Grid"]
         self.edf_in_use_components['n_ac_grid'] = len(self.edf_in_use_components['ac_grid_ids'])
-
+        self.edf_in_use_components['ac_grid_nominal_power'] = [
+            self.edf_components['nominal_power'][i]
+            for i, value in enumerate(self.edf_components['node_number'])
+            if value in self.edf_in_use_components['ac_grid_ids']
+        ]
 
         # EVS:
         self.edf_in_use_components['evs_ids'] = [t[1] for t in self.edf_in_use_components['nodes_types'] if t[0] == "EV"]
@@ -223,6 +227,12 @@ class DC_Community_Opt():
                                 initialize=self.convert_to_dictionary(np.array(self.edf_in_use_components['pv_power_profile'])),
                                 doc='Forecasted power generation')
         
+        # AC GENERATORS:
+        self.model.ac_gen = pe.Set(initialize=np.arange(1, self.edf_in_use_components['n_ac_grid']),
+                            doc='Number of generators')
+        self.model.acGenMax = pe.Param(self.model.ac_gen, initialize=self.convert_to_dictionary(np.array(self.edf_in_use_components['ac_grid_nominal_power'])),
+                                    doc='Gen Max')
+        
         # LOADS:
         self.model.loads = pe.Set(initialize=np.arange(1, self.edf_in_use_components['n_loads'] + 1), 
                             doc='Number of loads')
@@ -313,6 +323,10 @@ class DC_Community_Opt():
                                 doc='Active power generation')
         self.model.genExcPower = pe.Var(self.model.gen, self.model.t, within=pe.NonNegativeReals, initialize=0,
                                 doc='Excess power generation')
+        
+        self.model.acGenActPower = pe.Var(self.model.ac_gen, self.model.t, within=pe.NonNegativeReals, initialize=0,
+                                doc='Active power generation AC')
+        
         self.model.genXo = pe.Var(self.model.gen, self.model.t, within=pe.Binary, initialize=0,
                             doc='Generation on/off')
         
@@ -353,16 +367,19 @@ class DC_Community_Opt():
                                 doc='Relaxtion variable for following schedule of discharging')
 
     def constraints(self):
-        # Upper limit for the PV generator, both types are PV generators, but, type 2 can be curtailed 
+        # Upper limit for the PV generator
         def _genActMaxEq(m, g, t):
-            if m.genType[g] == 1:
-                return m.genActPower[g, t] <= m.genMax[g]
-            elif m.genType[g] == 2:
-                return m.genActPower[g, t] + m.genExcPower[g, t] == m.genValues[g, t]
-            return default_behaviour
-
+            return m.genActPower[g, t] + m.genExcPower[g, t] == m.genValues[g, t]
+        
         self.model.genActMaxEq = pe.Constraint(self.model.gen, self.model.t, rule=_genActMaxEq,
                                             doc='Maximum active power generation')
+        
+        # Upper limit for the PV generator, both types are PV generators, but, type 2 can be curtailed 
+        def _acGenActMaxEq(m, ac, t):
+            return m.acGenActPower[ac, t] <= m.acGenMax[ac]
+
+        self.model.acGenActMaxEq = pe.Constraint(self.model.ac_gen, self.model.t, rule=_acGenActMaxEq,
+                                            doc='Maximum active power generation AC')
         # Battery discharge limit 
         def _storDchRateEq(m, s, t):
             return m.storDischarge[s, t] <= m.storDchMax[s] * m.storDchXo[s, t]
@@ -464,6 +481,9 @@ class DC_Community_Opt():
         def _balanceEq(m, t):
             temp_gens = sum([m.genActPower[g, t] - m.genExcPower[g, t]
                             for g in np.arange(1, m.gen.last() + 1)])
+            
+            temp_ac_gens = sum(m.acGenActPower[ac, t] for ac in np.arange(1, m.ac_gen.last() + 1))
+            
             temp_load = sum([m.loadValues[l, t] for l in np.arange(1, m.loads.last() + 1)])
 
             temp_stor = sum([m.storCharge[s, t] - m.storDischarge[s, t]
@@ -472,12 +492,12 @@ class DC_Community_Opt():
             temp_v2g = sum([m.v2gCharge[v, t] - m.v2gDischarge[v, t]
                             for v in np.arange(1, m.v2g.last() + 1)])
             
-            return temp_gens - temp_load - temp_stor - temp_v2g == 0
+            return temp_gens + temp_ac_gens - temp_load - temp_stor - temp_v2g == 0
 
         self.model.balanceEq = pe.Constraint(self.model.t, rule=_balanceEq,
                                             doc='Balance equation')
         def obj_rule(m):
-            return sum(m.genActPower[g, t] for t in np.arange(m.t.first(), m.t.last() + 1)
-                    for g in np.arange(1, m.gen.last() + 1) if m.genType[g] == 1)
+            return sum(m.acGenActPower[ac, t] for t in np.arange(m.t.first(), m.t.last() + 1)
+                    for ac in np.arange(1, m.ac_gen.last() + 1))
         
         self.model.obj = pe.Objective(expr=obj_rule, sense=pe.minimize)
