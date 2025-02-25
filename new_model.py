@@ -276,32 +276,40 @@ class DC_Community_Opt():
                                 doc='Number of EVs')
         
         self.model.v2gDchMax = pe.Param(self.model.v2g, 
-                                initialize=self.convert_to_dictionary(),
+                                initialize=self.convert_to_dictionary(np.array(self.edf_in_use_components['ev_nominal_power'])),
                                 doc='Maximum scheduled discharging power')
         self.model.v2gChMax = pe.Param(self.model.v2g, 
-                                initialize=self.convert_to_dictionary(),
+                                initialize=self.convert_to_dictionary(np.array(self.edf_in_use_components['ev_nominal_power'])),
                                 doc='Maximum scheduled charging power')
 
+        ev_effs = [0.98] * self.edf_in_use_components['n_evs']
         self.model.v2gDchEff = pe.Param(self.model.v2g,
-                                initialize=self.convert_to_dictionary(),
+                                initialize=self.convert_to_dictionary(np.array(ev_effs)),
                                 doc='Discharging efficiency')
         self.model.v2gChEff = pe.Param(self.model.v2g,
-                                initialize=self.convert_to_dictionary(),
+                                initialize=self.convert_to_dictionary(np.array(ev_effs)),
                                 doc='Charging efficiency')
         self.model.v2gMax = pe.Param(self.model.v2g,
-                                initialize=self.convert_to_dictionary(),
+                                initialize=self.convert_to_dictionary(np.array(self.edf_in_use_components['ev_max_capacity'])),
                                 doc='Maximum energy capacity')
+        
+        v2g_min = [0] * self.edf_in_use_components['n_evs']
         self.model.v2gMin = pe.Param(self.model.v2g,
-                                initialize=self.convert_to_dictionary(),
+                                initialize=self.convert_to_dictionary(np.array(v2g_min)),
                                 doc='Minimum energy capacity')
+        
+        v2g_conn = [1] * self.edf_in_use_components['n_time']
         self.model.v2gConnected = pe.Param(self.model.v2g, self.model.t,
-                                    initialize=self.convert_to_dictionary(),
+                                    initialize=self.convert_to_dictionary(np.array(v2g_conn)),
                                     doc='Vehicle schedule')
-        self.model.v2gScheduleArrivalEnergy = pe.Param(self.model.v2g,
-                                            initialize=self.convert_to_dictionary(),
+        v2g_arrival_soc = [0.3] * self.edf_in_use_components['n_evs']
+        
+        self.model.v2gScheduleArrivalSoC = pe.Param(self.model.v2g,
+                                            initialize=self.convert_to_dictionary(np.array(v2g_arrival_soc)),
                                             doc='Vehicle schedule arrival SOC')
-        self.model.v2gScheduleTargetEnergy = pe.Param(self.model.v2g,
-                                                initialize=self.convert_to_dictionary(),
+        v2g_target_soc = [0.9] * self.edf_in_use_components['n_evs']
+        self.model.v2gScheduleTargetSoC = pe.Param(self.model.v2g,
+                                                initialize=self.convert_to_dictionary(np.array(v2g_target_soc)),
                                                 doc='Vehicle schedule required')
         
     def vars(self):
@@ -444,11 +452,11 @@ class DC_Community_Opt():
         # First it is validated if the EV is connected to the CS with this if
             if m.v2gConnected[v, t] == 1: #Quando chega ao ponto de carregamento tem que estar com maior SOC que o minimo
             #Then, it is validated the SOC required in energy, in case of this SOC being 0, the energy in the EV battery must be atleast the minimum 
-                if m.v2gScheduleTargetEnergy[v] == 0:
+                if m.v2gScheduleTargetSoC[v] * m.v2gMax[v] == 0:
                     return m.v2gState[v, t] >= m.v2gMin[v] - m.v2gRelax[v, t]
                 # In case of the SOC required will be differente from 0, the energy in the battery must be more than this soc 
                 else:
-                    return m.v2gState[v, t] >= m.v2gScheduleTargetEnergy[v] - m.v2gRelax[v, t]
+                    return m.v2gState[v, t] >= m.v2gScheduleTargetSoC[v] * m.v2gMax[v] - m.v2gRelax[v, t]
             else:
                 return default_behaviour
             
@@ -456,7 +464,7 @@ class DC_Community_Opt():
                                             doc='Relaxation variable')
         def _v2gBalanceEq(m, v, t):
             if t == m.t.first():
-                return m.v2gState[v, t] == m.v2gScheduleArrivalEnergy[v] + m.v2gCharge[v, t] * m.v2gChEff[v]- m.v2gDischarge[v, t] / m.v2gDchEff[v]
+                return m.v2gState[v, t] == m.v2gScheduleArrivalSoC[v] * m.v2gMax[v] + m.v2gCharge[v, t] * m.v2gChEff[v]- m.v2gDischarge[v, t] / m.v2gDchEff[v]
             elif t > m.t.first():
                 return m.v2gState[v, t] == m.v2gState[v, t - 1] + m.v2gCharge[v, t] * m.v2gChEff[v] - m.v2gDischarge[v, t] / m.v2gDchEff[v]
             return default_behaviour
@@ -472,12 +480,11 @@ class DC_Community_Opt():
         
         def _v2gMinExitSoC(m, v, t):
             if t == m.t.last():
-                return m.v2gState[v, t] >= m.v2gScheduleTargetEnergy[v]
+                return m.v2gState[v, t] >= m.v2gScheduleTargetSoC[v] * m.v2gMax[v]
             return default_behaviour
         self.model.v2gMinExitSoC = pe.Constraint(self.model.v2g, self.model.t, rule=_v2gMinExitSoC,
                                             doc='Min Exit Soc')
-        
-            
+              
         def _balanceEq(m, t):
             temp_gens = sum([m.genActPower[g, t] - m.genExcPower[g, t]
                             for g in np.arange(1, m.gen.last() + 1)])
@@ -501,3 +508,14 @@ class DC_Community_Opt():
                     for ac in np.arange(1, m.ac_gen.last() + 1))
         
         self.model.obj = pe.Objective(expr=obj_rule, sense=pe.minimize)
+        
+    def execute(self, executable):
+        self.params()
+        self.vars()
+        self.constraints()
+        self.model.write(f'opt_logger.lp', io_options={'symbolic_solver_labels': True})
+        opt = pyomo.opt.SolverFactory('cplex', executable=executable, tee=True)
+        opt.options['LogFile'] = f'opt_logger.log'
+        opt.options['timelimit'] = 1*60
+        opt.solve(self.model)
+        log_infeasible_constraints(self.model)
